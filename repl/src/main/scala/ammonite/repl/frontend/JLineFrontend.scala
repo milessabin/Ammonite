@@ -1,10 +1,15 @@
 package ammonite.repl.frontend
 
-import java.io.{OutputStream, InputStream}
+import java.awt.event.{ActionEvent, ActionListener}
+import java.io.{IOException, OutputStream, InputStream}
+import java.util.Arrays
 
 import ammonite.repl.{Catching, Evaluated, Res}
-import jline.console.{completer, ConsoleReader}
+import jline2000.console.completer
 import acyclic.file
+import jline2000.UnixTerminal
+import jline2000.console.{ConsoleReader, UserInterruptException}
+import jline2000.console.completer.{CompletionHandler, Completer}
 
 import scala.tools.nsc.interpreter._
 import collection.JavaConversions._
@@ -20,25 +25,27 @@ trait JLineFrontend{
   def action(buffered: String): Res[String]
   def update(buffered: String, r: Res[Evaluated]): Unit
 }
+
 object JLineFrontend{
   def apply(input: InputStream,
             output: OutputStream,
             shellPrompt: => String,
             compilerComplete: => (Int, String) => (Int, Seq[String], Seq[String]),
             initialHistory: Seq[String]): JLineFrontend
-            = new JLineFrontend with jline.console.completer.Completer {
+            = new JLineFrontend with Completer {
 
-    val term = new jline.UnixTerminal()
+    val term = new UnixTerminal()
 
     term.init()
     val reader = new ConsoleReader(input, output, term)
     def width = term.getWidth
+
     reader.setHistoryEnabled(true)
     reader.addCompleter(this)
     reader.setExpandEvents(false)
     reader.setHandleUserInterrupt(true)
     val defaultHandler = reader.getCompletionHandler
-    reader.setCompletionHandler(new completer.CompletionHandler {
+    reader.setCompletionHandler(new CompletionHandler {
       def complete(reader: ConsoleReader, candidates: JList[CharSequence], position: Int): Boolean = {
         if (!signatures.isEmpty){
           println()
@@ -58,6 +65,7 @@ object JLineFrontend{
         cursor,
         buf
       )
+
       if (!completions.isEmpty) {
         candidates.addAll(completions.sorted)
         signatures = sigs.sorted
@@ -78,7 +86,14 @@ object JLineFrontend{
 
 
     def action(buffered: String): Res[String] = for {
-      _ <- Catching{ case e: jline.console.UserInterruptException =>
+      _ <- Catching{ case e: UserInterruptException =>
+
+        val buffer = reader.getCursorBuffer
+        val current = e.getPartialLine
+        println(s"ACTION |$current|")
+        val res = Console.BLUE_B + current.split(" ").mkString(Console.RESET + " " + Console.BLUE_B) + Console.RESET
+        println(res)
+
         if (e.getPartialLine == "" && buffered == "") {
           reader.println("Ctrl-D to exit")
         }

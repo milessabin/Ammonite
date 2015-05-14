@@ -100,9 +100,18 @@ lazy val tools = project
   .settings(
     name := "ammonite-tools"
   )
+lazy val jline2000 = project
+  .dependsOn(ops, pprint)
+  .settings(sharedSettings:_*)
+  .settings(
+    name := "ammonite-tools",
+    libraryDependencies ++= Seq(
+      "org.fusesource.jansi" % "jansi" % "1.11"
+    )
+  )
 
 lazy val repl = project
-  .dependsOn(pprint)
+  .dependsOn(pprint, jline2000)
   .settings(sharedSettings:_*)
   .settings(
     crossVersion := CrossVersion.full,
@@ -110,7 +119,6 @@ lazy val repl = project
     name := "ammonite-repl",
     libraryDependencies ++= Seq(
       "org.scala-lang" % "scala-compiler" % scalaVersion.value,
-      "jline" % "jline" % "2.12",
       "org.scala-lang" % "scala-reflect" % scalaVersion.value,
       "org.apache.ivy" % "ivy" % "2.4.0",
       "com.lihaoyi" %% "scalaparse" % "0.1.4"
@@ -128,3 +136,5 @@ lazy val readme = ScalatexReadme(
 
 
 lazy val root = project.in(file(".")).aggregate(pprint,  ops, tools, repl)
+
+
