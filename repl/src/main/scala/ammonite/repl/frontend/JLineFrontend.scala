@@ -5,12 +5,14 @@ import java.io.{IOException, OutputStream, InputStream}
 import java.util.Arrays
 
 import ammonite.repl.{Catching, Evaluated, Res}
-import jline2000.console.completer
+import jline.console.completer
 import acyclic.file
-import jline2000.UnixTerminal
-import jline2000.console.{ConsoleReader, UserInterruptException}
-import jline2000.console.completer.{CompletionHandler, Completer}
+import jline.UnixTerminal
+import jline.console.{ConsoleReader, UserInterruptException}
+import jline.console.completer.{CompletionHandler, Completer}
+import org.fusesource.jansi.AnsiOutputStream
 
+import scala.annotation.tailrec
 import scala.tools.nsc.interpreter._
 import collection.JavaConversions._
 
@@ -26,6 +28,59 @@ trait JLineFrontend{
   def update(buffered: String, r: Res[Evaluated]): Unit
 }
 
+class JLineLite(width: Int,
+                input: InputStream,
+                output: OutputStream){
+  def readLine(prompt: String) = {
+    var buffer = Vector.empty[Char]
+    var cursor = 0
+    output.write(prompt.getBytes)
+    @tailrec def rec(): String = {
+      input.read() match{
+        case 27 => input.read() match{
+          case 91 => input.read() match{
+            case 65 =>
+
+              output.write("\033[1A".getBytes())
+            case 66 =>
+
+              output.write("\033[1B".getBytes())
+            case 67 =>
+              cursor += 1
+              output.write("\033[1C".getBytes())
+            case 68 =>
+              cursor -= 1
+              output.write("\033[1D".getBytes())
+          }
+            output.flush()
+            rec()
+          case x =>
+            output.flush()
+            rec()
+        }
+        case 13 =>
+          output.write(10)
+          output.write(13)
+          output.flush()
+          buffer.mkString
+        case x =>
+          output.write("\033[9999D".getBytes())
+          output.write("\033[2K".getBytes)
+          val (first, last) = buffer.splitAt(cursor)
+          buffer = (first :+ x.toChar) ++ last
+          output.write(prompt.getBytes)
+          output.write(buffer.mkString.getBytes)
+          cursor += 1
+          output.write("\033[9999D".getBytes())
+          output.write(s"\033[${cursor + 2 /* prompt width! */}C".getBytes())
+          output.flush()
+          rec()
+      }
+
+    }
+    rec()
+  }
+}
 object JLineFrontend{
   def apply(input: InputStream,
             output: OutputStream,
@@ -34,10 +89,16 @@ object JLineFrontend{
             initialHistory: Seq[String]): JLineFrontend
             = new JLineFrontend with Completer {
 
-    val term = new UnixTerminal()
 
-    term.init()
+
+    val term = new UnixTerminal()
+//    term.init()
+
+
+
+
     val reader = new ConsoleReader(input, output, term)
+
     def width = term.getWidth
 
     reader.setHistoryEnabled(true)
@@ -84,13 +145,11 @@ object JLineFrontend{
             .map(_.value().toString)
             .toVector
 
-
     def action(buffered: String): Res[String] = for {
       _ <- Catching{ case e: UserInterruptException =>
 
         val buffer = reader.getCursorBuffer
         val current = e.getPartialLine
-        println(s"ACTION |$current|")
         val res = Console.BLUE_B + current.split(" ").mkString(Console.RESET + " " + Console.BLUE_B) + Console.RESET
         println(res)
 
@@ -101,7 +160,7 @@ object JLineFrontend{
       }
 
       res <- Option(
-        reader.readLine(
+        new JLineLite(width, input, output).readLine(
           if (buffered.isEmpty) shellPrompt + " "
           // Strip ANSI color codes, as described http://stackoverflow.com/a/14652763/871202
           else " " * (shellPrompt.replaceAll("\u001B\\[[;\\d]*m", "").length + 1)
