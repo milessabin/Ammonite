@@ -2,6 +2,9 @@ package ammonite.terminal
 
 import java.io.{FileOutputStream, OutputStream}
 
+import scala.annotation.tailrec
+import scala.collection.mutable
+
 
 object Debug{
   val debugOutput= new FileOutputStream(new java.io.File("log"))
@@ -76,11 +79,11 @@ object TTY{
     val width = "(\\d+) columns;".r.findFirstMatchIn(raw).get.group(1).toInt
     val height = "(\\d+) rows;".r.findFirstMatchIn(raw).get.group(1).toInt
     log("Initializing, Width " + width)
+    val initialConfig = stty("-g").trim
     stty("-icanon min 1 -icrnl -inlcr -ixon")
     stty("dsusp undef")
     stty("-echo")
-
-    val initialConfig = stty("-g").trim
+    stty("intr undef")
     (width, height, initialConfig)
   }
   def stty(s: String) = {
@@ -89,5 +92,50 @@ object TTY{
   }
   def restore(initialConfig: String) = {
     stty(initialConfig)
+  }
+}
+
+/**
+ * A truly-lazy implementation of scala.Stream
+ */
+case class LazyList[T](headThunk: () => T, tailThunk: () => LazyList[T]){
+  var rendered = false
+  lazy val head = {
+    rendered = true
+    headThunk()
+  }
+
+  lazy val tail = tailThunk()
+
+  def dropPrefix(prefix: Seq[T]) = {
+    @tailrec def rec(n: Int, l: LazyList[T]): Option[LazyList[T]] = {
+      if (n >= prefix.length) Some(l)
+      else if (prefix(n) == l.head) rec(n + 1, l.tail)
+      else None
+    }
+    rec(0, this)
+  }
+  override def toString = {
+
+    @tailrec def rec(l: LazyList[T], res: List[T]): List[T] = {
+      if (l.rendered) rec(l.tailThunk(), l.head :: res)
+      else res
+    }
+    s"LazyList(${(rec(this, Nil).reverse ++ Seq("...")).mkString(",")})"
+  }
+}
+object LazyList{
+  object ~:{
+    def unapply[T](x: LazyList[T]) = Some((x.head, x.tail))
+  }
+  def continually[T](t: => T): LazyList[T] = LazyList(() => t, () =>continually(t))
+
+  implicit class CS(ctx: StringContext){
+    val base = ctx.parts.mkString
+    object pref{
+      def unapply(s: LazyList[Int]): Option[LazyList[Int]] = {
+        s.dropPrefix(base.map(_.toInt))
+      }
+    }
   }
 }
