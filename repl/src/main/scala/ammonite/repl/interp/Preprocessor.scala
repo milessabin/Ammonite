@@ -80,15 +80,9 @@ object Preprocessor{
     def apply(code: String, wrapperId: String): Res[Preprocessor.Output] = {
       import fastparse._
       import scalaparse.Scala._
-      val Prelude = P( Annot.rep ~ `implicit`.? ~ `lazy`.? ~ LocalMod.rep )
-      val Splitter = P( Semis.? ~ (scalaparse.Scala.Import | Prelude ~ BlockDef | StatCtx.Expr).!.rep(Semis) ~ Semis.? ~ WL ~ End)
 
-
-      Splitter.parse(code) match {
-        case Result.Failure(_, index) if index == code.length => Res.Buffer(code)
-        case f @ Result.Failure(p, index) =>
-
-          Res.Failure(parse(code).left.get)
+      ammonite.repl.Splitter.Splitter.parse(code) match {
+        case f @ Result.Failure(p, index) => Res.Failure(parse(code).left.get)
         case Result.Success(Nil, _) => Res.Skip
         case Result.Success(postSplit: Seq[String], _) => complete(code, wrapperId, postSplit.map(_.trim))
       }

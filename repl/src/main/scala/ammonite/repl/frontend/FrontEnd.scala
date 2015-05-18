@@ -5,6 +5,9 @@ import java.io.{IOException, OutputStream, InputStream}
 import java.util.Arrays
 
 import ammonite.repl.{Catching, Evaluated, Res}
+import ammonite.terminal.LazyList.~:
+import ammonite.terminal.{TermState, Term, TermCore}
+import fastparse._
 import jline.console.completer
 import acyclic.file
 import jline.UnixTerminal
@@ -19,83 +22,52 @@ import collection.JavaConversions._
 /**
  * All the mucky JLine interfacing code
  */
-trait JLineFrontend{
+trait FrontEnd{
   /**
    * The width of the terminal
    */
   def width: Int
-  def action(buffered: String): Res[String]
-  def update(buffered: String, r: Res[Evaluated]): Unit
+  def action(): Res[String]
+  def update(r: Res[Evaluated]): Unit
 }
 
-class JLineLite(width: Int,
-                input: InputStream,
-                output: OutputStream){
-  def readLine(prompt: String) = {
-    var buffer = Vector.empty[Char]
-    var cursor = 0
-    output.write(prompt.getBytes)
-    @tailrec def rec(): String = {
-      input.read() match{
-        case 27 => input.read() match{
-          case 91 => input.read() match{
-            case 65 =>
+object FrontEnd{
 
-              output.write("\033[1A".getBytes())
-            case 66 =>
-
-              output.write("\033[1B".getBytes())
-            case 67 =>
-              cursor += 1
-              output.write("\033[1C".getBytes())
-            case 68 =>
-              cursor -= 1
-              output.write("\033[1D".getBytes())
-          }
-            output.flush()
-            rec()
-          case x =>
-            output.flush()
-            rec()
+  def special(input: InputStream,
+              output: OutputStream,
+              shellPrompt: => String,
+              compilerComplete: => (Int, String) => (Int, Seq[String], Seq[String])) = new FrontEnd{
+    val multilineFilter: TermCore.Filter = {
+      case TermState(13 ~: rest, b, c) => // Enter
+        val code = b.mkString
+        ammonite.repl.Splitter.Splitter.parse(code) match {
+          case Result.Failure(_, index) if index == code.length =>
+            val (first, last) = b.splitAt(c)
+            TermState(rest, (first :+ '\n') ++ last, c + 1)
+          case _ =>
+            ammonite.terminal.Result(code)
         }
-        case 13 =>
-          output.write(10)
-          output.write(13)
-          output.flush()
-          buffer.mkString
-        case x =>
-          output.write("\033[9999D".getBytes())
-          output.write("\033[2K".getBytes)
-          val (first, last) = buffer.splitAt(cursor)
-          buffer = (first :+ x.toChar) ++ last
-          output.write(prompt.getBytes)
-          output.write(buffer.mkString.getBytes)
-          cursor += 1
-          output.write("\033[9999D".getBytes())
-          output.write(s"\033[${cursor + 2 /* prompt width! */}C".getBytes())
-          output.flush()
-          rec()
-      }
+    }
+    def width = 80
+    def action(): Res[String] = {
+      TermCore.readLine(shellPrompt, System.in, System.out, multilineFilter orElse Term.defaultFilter)
+        .map(Res.Success(_))
+        .getOrElse(Res.Exit)
+    }
+    def update(r: Res[Evaluated]) = {
 
     }
-    rec()
   }
-}
-object JLineFrontend{
-  def apply(input: InputStream,
+
+  def jline(input: InputStream,
             output: OutputStream,
             shellPrompt: => String,
             compilerComplete: => (Int, String) => (Int, Seq[String], Seq[String]),
-            initialHistory: Seq[String]): JLineFrontend
-            = new JLineFrontend with Completer {
-
-
+            initialHistory: Seq[String]): FrontEnd
+            = new FrontEnd with Completer {
 
     val term = new UnixTerminal()
-//    term.init()
-
-
-
+    term.init()
 
     val reader = new ConsoleReader(input, output, term)
 
@@ -145,7 +117,7 @@ object JLineFrontend{
             .map(_.value().toString)
             .toVector
 
-    def action(buffered: String): Res[String] = for {
+    def action(): Res[String] = for {
       _ <- Catching{ case e: UserInterruptException =>
 
         val buffer = reader.getCursorBuffer
@@ -153,35 +125,31 @@ object JLineFrontend{
         val res = Console.BLUE_B + current.split(" ").mkString(Console.RESET + " " + Console.BLUE_B) + Console.RESET
         println(res)
 
-        if (e.getPartialLine == "" && buffered == "") {
+        if (e.getPartialLine == "") {
           reader.println("Ctrl-D to exit")
         }
         Res.Skip
       }
 
       res <- Option(
-        new JLineLite(width, input, output).readLine(
-          if (buffered.isEmpty) shellPrompt + " "
-          // Strip ANSI color codes, as described http://stackoverflow.com/a/14652763/871202
-          else " " * (shellPrompt.replaceAll("\u001B\\[[;\\d]*m", "").length + 1)
-        )
+        reader.readLine(shellPrompt + " ")
       ).map(Res.Success(_))
         .getOrElse(Res.Exit)
 
-    } yield buffered + res
+    } yield res
 
-    def update(buffered: String, r: Res[Evaluated]) = r match{
+    def update(r: Res[Evaluated]) = r match{
 
-      case Res.Buffer(line) =>
-        /**
-         * Hack to work around the fact that if nothing got entered into
-         * the prompt, the `ConsoleReader`'s history wouldn't increase
-         */
-        if(line != buffered + "\n") reader.getHistory.removeLast()
+//      case Res.Buffer(line) =>
+//        /**
+//         * Hack to work around the fact that if nothing got entered into
+//         * the prompt, the `ConsoleReader`'s history wouldn't increase
+//         */
+//        if(line != buffered + "\n") reader.getHistory.removeLast()
 
       case Res.Success(ev) =>
         val last = reader.getHistory.size()-1
-        reader.getHistory.set(last, buffered + reader.getHistory.get(last))
+        reader.getHistory.set(last, reader.getHistory.get(last))
 
       case Res.Exit =>
         // Otherwise the terminal gets left in a funny

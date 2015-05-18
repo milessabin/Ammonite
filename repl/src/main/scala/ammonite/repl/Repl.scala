@@ -13,19 +13,18 @@ class Repl(input: InputStream,
            output: OutputStream,
            colorSet: ColorSet = ColorSet.Default,
            pprintConfig: pprint.Config = pprint.Config.Colors.PPrintConfig,
-           shellPrompt0: String = "@",
+           shellPrompt0: String = "@ ",
            initialHistory: Seq[String] = Nil,
            saveHistory: String => Unit = _ => (),
            predef: String = Repl.defaultPredef) {
 
   val shellPrompt = Ref(shellPrompt0)
 
-  val frontEnd = JLineFrontend(
+  val frontEnd = FrontEnd.special(
     input,
     output,
     colorSet.prompt + shellPrompt() + scala.Console.RESET,
-    interp.pressy.complete(_, interp.eval.previousImportBlock, _),
-    initialHistory
+    interp.pressy.complete(_, interp.eval.previousImportBlock, _)
   )
 
   val interp: Interpreter = new Interpreter(
@@ -40,7 +39,7 @@ class Repl(input: InputStream,
 
   def action() = for{
     // Condition to short circuit early if `interp` hasn't finished evaluating
-    line <- frontEnd.action(interp.buffered)
+    line <- frontEnd.action()
     _ <- Signaller("INT") { interp.mainThread.stop() }
     out <- interp.processLine(line, (f, x) => {saveHistory(x); f(x)}, _.foreach(print))
   } yield {

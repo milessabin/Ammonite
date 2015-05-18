@@ -14,6 +14,8 @@ object Debug{
 }
 import Debug.log
 class Ansi(output: OutputStream){
+  def save() = output.write(s"\033[s".getBytes)
+  def restore() = output.write(s"\033[u".getBytes)
   def control(n: Int, c: Char) = output.write(s"\033[$n$c".getBytes)
 
   /**
@@ -123,6 +125,7 @@ case class LazyList[T](headThunk: () => T, tailThunk: () => LazyList[T]){
     }
     s"LazyList(${(rec(this, Nil).reverse ++ Seq("...")).mkString(",")})"
   }
+  def ~:(other: => T) = LazyList(() => other, () => this)
 }
 object LazyList{
   object ~:{

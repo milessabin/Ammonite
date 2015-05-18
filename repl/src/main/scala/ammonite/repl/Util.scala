@@ -1,8 +1,10 @@
 package ammonite.repl
 
 import acyclic.file
+import fastparse._
 
 import scala.util.Try
+import scalaparse.Scala._
 
 object Res{
   def apply[T](o: Option[T], errMsg: => String) = o match{
@@ -50,7 +52,6 @@ object Res{
   }
   case object Skip extends Failing
   case object Exit extends Failing
-  case class Buffer(s: String) extends Failing
 }
 
 /**
@@ -150,4 +151,8 @@ object BacktickWrap{
       case _ => "`" + ammonite.pprint.PPrinter.escape(s) + "`"
     }
   }
+}
+object Splitter{
+  val Prelude = P( Annot.rep ~ `implicit`.? ~ `lazy`.? ~ LocalMod.rep )
+  val Splitter = P( Semis.? ~ (scalaparse.Scala.Import | Prelude ~ BlockDef | StatCtx.Expr).!.rep(Semis) ~ Semis.? ~ WL ~ End)
 }

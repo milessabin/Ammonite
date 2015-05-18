@@ -4,179 +4,128 @@ import java.io._
 import scala.annotation.tailrec
 
 import Debug.log
-import LazyList._
+import ammonite.terminal.LazyList._
 
 
 // Test Unicode:  漢語;𩶘da
 object Term{
   def main(args: Array[String]): Unit = {
-    val t = new Term(System.in, System.out)
-    @tailrec def rec(): Unit = t.readLine("@ ") match{
-      case None =>
-      case Some(s) =>
-        println(s)
-        rec()
-    }
     rec()
-    t.restore()
+    @tailrec def rec(): Unit = {
+      TermCore.readLine("@ ", System.in, System.out, multilineFilter orElse defaultFilter) match {
+        case None => println("Bye!")
+        case Some(s) =>
+          println(s)
+          rec()
+      }
+    }
+  }
+
+  val TS = TermState
+  val TI = TermInfo
+  val multilineFilter: TermCore.Filter = {
+    case TS(13 ~: rest, b, c) =>
+      val open = b.count(_ == '(')
+      val close = b.count(_ == ')')
+      log(open + "\t" + close)
+      if (open == close) Result(b.mkString)
+      else {
+        val (first, last) = b.splitAt(c)
+        TermState(rest, (first :+ '\n') ++ last, c + 1)
+      }
+  }
+  val defaultFilter = {
+    advancedNavFilter orElse
+    basicNavFilter orElse
+    exitFilter orElse
+    enterFilter orElse
+    loggingFilter orElse
+    typingFilter
+  }
+
+
+  lazy val loggingFilter: TermCore.Filter = {
+    case TS(5 ~: rest, b, c) => // Ctrl-E
+      println("Char Display Mode Enabled! Ctrl-C to exit")
+      var curr = rest
+      while (curr.head != 3) {
+        println("Char " + curr.head)
+        curr = curr.tail
+      }
+      TS(curr, b, c)
+  }
+  lazy val typingFilter: TermCore.Filter = {
+    case TS(pref"\u001b[3~$rest", b, c) =>
+      log("fn-delete")
+      val (first, last) = b.splitAt(c)
+      TS(rest, first ++ last.drop(1), c)
+
+    case TS(127 ~: rest, b, c) => // Backspace
+      val (first, last) = b.splitAt(c)
+      TS(rest, first.dropRight(1) ++ last, c - 1)
+
+
+
+
+    case TS(char ~: rest, b, c) =>
+      log("NORMAL CHAR " + char)
+      val (first, last) = b.splitAt(c)
+      TS(rest, (first :+ char.toChar) ++ last, c + 1)
+  }
+
+  lazy val enterFilter: TermCore.Filter = {
+    case TS(13 ~: rest, b, c) => // Enter
+      Result(b.mkString)
+  }
+  lazy val exitFilter: TermCore.Filter = {
+    case TS(3 ~: rest, b, c) => // Ctrl-C
+      TS(rest, Vector.empty, 0)
+    case TS(4 ~: rest, b, c) => Exit // Ctrl-D
+  }
+  lazy val basicNavFilter : TermCore.Filter = {
+    case TI(TS(pref"\u001b[A$rest", b, c), w) => log("up"); TS(rest, b, c - w)
+    case TI(TS(pref"\u001b[B$rest", b, c), w) => log("down"); TS(rest, b, c + w)
+    case TS(pref"\u001b[C$rest", b, c) => log("right"); TS(rest, b, c + 1)
+    case TS(pref"\u001b[D$rest", b, c) => log("left"); TS(rest, b, c - 1)
+
+    case TS(pref"\u001b[5~$rest", b, c) => log("fn-up"); TS(rest, b, c)
+    case TS(pref"\u001b[6~$rest", b, c) => log("fn-down"); TS(rest, b, c)
+    case TS(pref"\u001b[F$rest", b, c) => log("fn-right"); TS(rest, b, c + 9999)
+    case TS(pref"\u001b[H$rest", b, c) => log("fn-left"); TS(rest, b, c - 9999)
+
+  }
+  lazy val advancedNavFilter: TermCore.Filter = {
+    case TS(pref"\u001b\u001b[A$rest", b, c) => log("alt-up"); TS(rest, b, c)
+    case TS(pref"\u001b\u001b[B$rest", b, c) => log("alt-down"); TS(rest, b, c)
+    case TS(pref"\u001b\u001b[C$rest", b, c) => log("alt-right"); TS(rest, b, c)
+    case TS(pref"\u001b\u001b[D$rest", b, c) => log("alt-left"); TS(rest, b, c)
+
+    case TS(pref"\u001b[1;2A$rest", b, c) => log("shift-up"); TS(rest, b, c)
+    case TS(pref"\u001b[1;2B$rest", b, c) => log("shift-down"); TS(rest, b, c)
+    case TS(pref"\u001b[1;2C$rest", b, c) => log("shift-right"); TS(rest, b, c)
+    case TS(pref"\u001b[1;2D$rest", b, c) => log("shift-left"); TS(rest, b, c)
+
+    case TS(pref"\u001b\u001b[5~$rest", b, c) => log("fn-alt-up"); TS(rest, b, c)
+    case TS(pref"\u001b\u001b[6~$rest", b, c) => log("fn-alt-down"); TS(rest, b, c)
+    case TS(pref"\u001b[1;9F$rest", b, c) => log("fn-alt-right"); TS(rest, b, c)
+    case TS(pref"\u001b[1;9H$rest", b, c) => log("fn-alt-left"); TS(rest, b, c)
+
+    // Conflicts with iTerm hotkeys, same as fn-{up, down}
+    // case TS(pref"\u001b[5~$rest", b, c) => TS(rest, b, c) //fn-shift-up
+    // case TS(pref"\u001b[6~$rest", b, c) => TS(rest, b, c) //fn-shift-down
+    case TS(pref"\u001b[1;2F$rest", b, c) => log("fn-shift-right"); TS(rest, b, c)
+    case TS(pref"\u001b[1;2H$rest", b, c) => log("fn-shift-left"); TS(rest, b, c)
+
+    case TS(pref"\u001b[1;10A$rest", b, c) => log("alt-shift-up"); TS(rest, b, c)
+    case TS(pref"\u001b[1;10B$rest", b, c) => log("alt-shift-down"); TS(rest, b, c)
+    case TS(pref"\u001b[1;10C$rest", b, c) => log("alt-shift-right"); TS(rest, b, c)
+    case TS(pref"\u001b[1;10D$rest", b, c) => log("alt-shift-left"); TS(rest, b, c)
+
+    // Same as the case fn-alt-{up,down} without the shift
+    // case TS(pref"\u001b\u001b[5~$rest", b, c) => TS(rest, b, c) //fn-alt-shift-up
+    // case TS(pref"\u001b\u001b[6~$rest", b, c) => TS(rest, b, c) //fn-alt-shift-down
+    case TS(pref"\u001b[1;10F$rest", b, c) => log("fn-alt-shift-right"); TS(rest, b, c)
+    case TS(pref"\u001b[1;10H$rest", b, c) => log("fn-alt-shift-left"); TS(rest, b, c)
   }
 }
 
-class Term(input: InputStream,
-           output: OutputStream){
-  val ansi = new Ansi(output)
-  val (width, height, initialConfig) = TTY.init()
-
-
-  def heightFor(cursor: Int, bufferLength: Int) = {
-    val totalLength = (
-      // Length of the original text
-      bufferLength
-      // If the cursor is at the end, it needs one more spot
-      + (if (cursor == bufferLength) 1 else 0)
-      // We only want to count the last line if there is at
-      // least one character on that line
-      - 1
-    )
-    totalLength / width
-  }
-
-  def restore() = TTY.stty(initialConfig)
-
-  val reader = new InputStreamReader(input)
-  val writer = new OutputStreamWriter(output)
-  def readLine(prompt: String): Option[String] = {
-    var buffer = Vector.empty[Char]
-    object cursor{
-      private[this] var value = 0
-      def apply() = value
-      def bound(n: Int) = {
-        if (n < 0) 0
-        else if (n > buffer.length) buffer.length
-        else n
-      }
-      def +=(n: Int) = {
-        value = bound(value + n)
-      }
-      def -=(n: Int) = {
-        value = bound(value - n)
-      }
-    }
-    def offsetCursor = cursor() + prompt.length
-    
-    var areaHeight = 0
-    def redrawLine() = {
-      ansi.moveTo(-1 - areaHeight, 0)
-      ansi.clearScreen(0)
-
-      writer.write(prompt)
-      writer.write(buffer.toArray)
-      writer.flush()
-      ansi.moveTo(-1 - (areaHeight - offsetCursor / width), offsetCursor % width)
-      writer.flush()
-    }
-
-    @tailrec def rec(stream: LazyList[Int]): Option[String] = {
-      redrawLine()
-      stream match{
-        case pref"\u001b[A$rest" => log("up"); cursor -= width; rec(rest)
-        case pref"\u001b[B$rest" => log("down"); cursor += width; rec(rest)
-        case pref"\u001b[C$rest" => log("right"); cursor += 1; rec(rest)
-        case pref"\u001b[D$rest" => log("left"); cursor -= 1; rec(rest)
-
-        case pref"\u001b[5~$rest" => log("fn-up"); rec(rest)
-        case pref"\u001b[6~$rest" => log("fn-down"); rec(rest)
-        case pref"\u001b[F$rest" => log("fn-right"); cursor += 9999; rec(rest)
-        case pref"\u001b[H$rest" => log("fn-left"); cursor -= 9999; rec(rest)
-
-        case pref"\u001b\u001b[A$rest" => log("alt-up"); rec(rest)
-        case pref"\u001b\u001b[B$rest" => log("alt-down"); rec(rest)
-        case pref"\u001b\u001b[C$rest" => log("alt-right"); rec(rest)
-        case pref"\u001b\u001b[D$rest" => log("alt-left"); rec(rest)
-
-        case pref"\u001b[1;2A$rest" => log("shift-up"); rec(rest)
-        case pref"\u001b[1;2B$rest" => log("shift-down"); rec(rest)
-        case pref"\u001b[1;2C$rest" => log("shift-right"); rec(rest)
-        case pref"\u001b[1;2D$rest" => log("shift-left"); rec(rest)
-
-        case pref"\u001b\u001b[5~$rest" => log("fn-alt-up"); rec(rest)
-        case pref"\u001b\u001b[6~$rest" => log("fn-alt-down"); rec(rest)
-        case pref"\u001b[1;9F$rest" => log("fn-alt-right"); rec(rest)
-        case pref"\u001b[1;9H$rest" => log("fn-alt-left"); rec(rest)
-
-        // Conflicts with iTerm hotkeys, same as fn-{up, down}
-        // case pref"\u001b[5~$rest" => rec(rest) //fn-shift-up
-        // case pref"\u001b[6~$rest" => rec(rest) //fn-shift-down
-        case pref"\u001b[1;2F$rest" => log("fn-shift-right"); rec(rest)
-        case pref"\u001b[1;2H$rest" => log("fn-shift-left"); rec(rest)
-
-        case pref"\u001b[1;10A$rest" => log("alt-shift-up"); rec(rest)
-        case pref"\u001b[1;10B$rest" => log("alt-shift-down"); rec(rest)
-        case pref"\u001b[1;10C$rest" => log("alt-shift-right"); rec(rest)
-        case pref"\u001b[1;10D$rest" => log("alt-shift-left"); rec(rest)
-
-        // Same as the case fn-alt-{up,down} without the shift
-        // case pref"\u001b\u001b[5~$rest" => rec(rest) //fn-alt-shift-up
-        // case pref"\u001b\u001b[6~$rest" => rec(rest) //fn-alt-shift-down
-        case pref"\u001b[1;10F$rest" => log("fn-alt-shift-right"); rec(rest)
-        case pref"\u001b[1;10H$rest" => log("fn-alt-shift-left"); rec(rest)
-
-        case pref"\u001b[3~$rest" =>
-          log("fn-delete")
-          val (first, last) = buffer.splitAt(cursor())
-          buffer = first ++ last.drop(1)
-          rec(rest)
-
-        case 127 ~: rest => // Backspace
-          val (first, last) = buffer.splitAt(cursor())
-          buffer = first.dropRight(1) ++ last
-          cursor -= 1
-          rec(rest)
-
-        case pref"\u001b[1$rest" =>
-          println("UNKNOWN ESCAPE! " + rest)
-          rec(rest)
-
-        case 3 ~: rest => // Ctrl-C
-          buffer = Vector.empty
-          cursor -= 9999
-          rec(rest)
-        case 4 ~: rest => None // Ctrl-D
-        case 5 ~: rest => // Ctrl-E
-          println("Char Display Mode Enabled! Ctrl-C to exit")
-          var curr = stream
-          while(curr.head != 3){
-            println("Char " + curr.head)
-            curr = curr.tail
-          }
-          rec(curr)
-
-        case 13 ~: rest => // Enter
-          cursor += 9999
-          redrawLine()
-          writer.write(10)
-          writer.write(13)
-          writer.flush()
-          Some(buffer.mkString)
-
-        case c ~: rest =>
-          log("NORMAL CHAR " + c)
-          val (first, last) = buffer.splitAt(cursor())
-          buffer = (first :+ c.toChar) ++ last
-
-          cursor += 1
-
-          val nextHeight = heightFor(offsetCursor, prompt.length + buffer.length)
-
-          if (nextHeight > areaHeight) {
-            Predef.println()
-            areaHeight = nextHeight
-          }
-
-          rec(rest)
-      }
-
-    }
-    rec(LazyList.continually(reader.read()))
-  }
-}
