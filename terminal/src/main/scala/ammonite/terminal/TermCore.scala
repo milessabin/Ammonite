@@ -37,7 +37,6 @@ object TermCore {
 
       // +1 to account for the newline between frags
       cumLength += fragLength + 1
-      println("cumHeight " + cumLength)
 
       // If the cursor is at the end, it needs one more spot
 
@@ -47,7 +46,6 @@ object TermCore {
       val height = (fragLength + (if ((cursor + promptLength) == cumLength) 1 else 0) - 1) / width + 1
       height
     }
-    Debug.log(fragHeights.toList)
     fragHeights.sum
   }
 
@@ -72,17 +70,22 @@ object TermCore {
                displayTransform: (Vector[Char], Int) => (Vector[Char], Int) = (x, i) => (x, i))
                : Option[String] = {
 
-
+    val noAnsiPrompt = prompt.replaceAll("\u001B\\[[;\\d]*m", "")
     def redrawLine(buffer: Vector[Char], cursor: Int) = {
       ansi.restore()
       ansi.clearScreen(0)
+      Debug("CURSOR " + cursor)
       val (transformedBuffer, transformedCursor) = displayTransform(buffer, cursor)
+      Debug("TransCURSOR " + transformedCursor)
       writer.write(prompt)
       writer.write(transformedBuffer.toArray)
       writer.flush()
       ansi.restore()
-      ansi.down((transformedCursor + prompt.length) / width)
-      ansi.right((transformedCursor + prompt.length) % width)
+
+      Debug("DOWN " + (transformedCursor + noAnsiPrompt.length) / width)
+      Debug("RIGHT " + (transformedCursor + noAnsiPrompt.length) % width)
+      ansi.down((transformedCursor + noAnsiPrompt.length) / width)
+      ansi.right((transformedCursor + noAnsiPrompt.length) % width)
       writer.flush()
     }
 
@@ -93,7 +96,7 @@ object TermCore {
         case TermState(s, b, c) =>
           val newCursor = math.max(math.min(c, b.length), 0)
 
-          val nextHeight = calculateHeight(b, newCursor, prompt.length, width)
+          val nextHeight = calculateHeight(b, newCursor, width, noAnsiPrompt.length)
           if (nextHeight > areaHeight) {
             Predef.println()
             ansi.restore()

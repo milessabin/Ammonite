@@ -8,11 +8,10 @@ import scala.collection.mutable
 
 object Debug{
   val debugOutput= new FileOutputStream(new java.io.File("log"))
-  def log(s: Any) = {
+  def apply(s: Any) = {
     debugOutput.write((System.currentTimeMillis() + "\t\t" + s + "\n").getBytes)
   }
 }
-import Debug.log
 class Ansi(output: OutputStream){
   def save() = output.write(s"\033[s".getBytes)
   def restore() = output.write(s"\033[u".getBytes)
@@ -80,7 +79,7 @@ object TTY{
 
     val width = "(\\d+) columns;".r.findFirstMatchIn(raw).get.group(1).toInt
     val height = "(\\d+) rows;".r.findFirstMatchIn(raw).get.group(1).toInt
-    log("Initializing, Width " + width)
+    Debug("Initializing, Width " + width)
     val initialConfig = stty("-g").trim
     stty("-icanon min 1 -icrnl -inlcr -ixon")
     stty("dsusp undef")
