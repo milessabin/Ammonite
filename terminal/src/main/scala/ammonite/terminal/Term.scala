@@ -81,9 +81,49 @@ object Term{
       TS(rest, Vector.empty, 0)
     case TS(4 ~: rest, b, c) => Exit // Ctrl-D
   }
+
+  def findChunks(b: Vector[Char], c: Int) = {
+    val chunks = TermCore.splitBuffer(b)
+    // The index of the first character in each chunk
+    val chunkStarts = chunks.inits.map(x => x.length + x.sum).toStream.reverse
+    // Index of the current chunk that contains the cursor
+    val chunkIndex = chunkStarts.indexWhere(_ > c) match {
+      case -1 => chunks.length-1
+      case x => x - 1
+    }
+    (chunks, chunkStarts, chunkIndex)
+  }
+  def move(b: Vector[Char],
+           c: Int,
+           w: Int,
+           boundaryOffset: Int,
+           nextChunkOffset: Int,
+           checkRes: Int,
+           check: (Int, Int) => Boolean,
+           isDown: Boolean) = {
+    val (chunks, chunkStarts, chunkIndex) = findChunks(b, c)
+    val offset = chunkStarts(chunkIndex + boundaryOffset)
+    if (check(checkRes, offset)) checkRes
+    else chunks.lift(chunkIndex + nextChunkOffset) match{
+      case None => c + nextChunkOffset * 9999
+      case Some(next) =>
+      val boundary = chunkStarts(chunkIndex + boundaryOffset)
+      val currentColumn = (c - chunkStarts(chunkIndex)) % w
+
+      if (isDown) boundary + math.min(currentColumn, next)
+      else boundary + math.min(currentColumn - next % w, 0) - 1
+    }
+  }
+  def moveUp(b: Vector[Char], c: Int, w: Int) = {
+    move(b, c, w, 0, -1, c - w, _ > _, false)
+  }
+  def moveDown(b: Vector[Char], c: Int, w: Int) = {
+    move(b, c, w, 1, 1, c + w, _ <= _, true)
+  }
+
   lazy val basicNavFilter : TermCore.Filter = {
-    case TI(TS(pref"\u001b[A$rest", b, c), w) => Debug("up"); TS(rest, b, c - w)
-    case TI(TS(pref"\u001b[B$rest", b, c), w) => Debug("down"); TS(rest, b, c + w)
+    case TI(TS(pref"\u001b[A$rest", b, c), w) => Debug("up"); TS(rest, b, moveUp(b, c, w))
+    case TI(TS(pref"\u001b[B$rest", b, c), w) => Debug("down"); TS(rest, b, moveDown(b, c, w))
     case TS(pref"\u001b[C$rest", b, c) => Debug("right"); TS(rest, b, c + 1)
     case TS(pref"\u001b[D$rest", b, c) => Debug("left"); TS(rest, b, c - 1)
 

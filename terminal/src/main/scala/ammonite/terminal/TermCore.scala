@@ -14,70 +14,84 @@ import scala.collection.mutable
  * the buffer", and "ansi terminal should reflect most up to date TermState"
  */
 object TermCore {
-  /*
-    width = 2
-    0 -> 1
-    1 -> 1
-    2 -> 1
-    3 -> 2
-    4 -> 2
-    5 -> 3
-     */
-  def fragHeight(length: Int, width: Int) = math.max(1, (length + 1) / width)
-
   /**
-   * Given a buffer with characters and newlines, calculates how high
-   * the buffer is and where the cursor goes inside of it.
+   * Computes how tall a line of text is when wrapped at `width`.
+   *
+   * Even 0-character lines still take up one row!
+   *
+   * width = 2
+   * 0 -> 1
+   * 1 -> 1
+   * 2 -> 1
+   * 3 -> 2
+   * 4 -> 2
+   * 5 -> 3
    */
+  def fragHeight(length: Int, width: Int) = math.max(1, (length - 1) / width + 1)
+
+  def splitBuffer(buffer: Vector[Char]) = {
+    val frags = mutable.Buffer.empty[Int]
+    frags.append(0)
+    for(c <- buffer){
+      if (c == '\n') frags.append(0)
+      else frags(frags.length - 1) = frags(frags.length - 1) + 1
+    }
+    frags
+  }
   def calculateHeight(buffer: Vector[Char],
                       cursor: Int,
                       width: Int,
                       prompt: String): (Int, Int, Int) = {
+    val rowLengths = splitBuffer(buffer)
 
-    val frags = mutable.Buffer.empty[Vector[Char]]
-    frags.append(prompt.toVector)
-    for(c <- buffer){
-      if (c == '\n') frags.append(Vector.empty)
-      else frags(frags.length - 1) = frags(frags.length - 1) :+ c
-    }
-    val promptCursor = cursor + prompt.length
+    calculateHeight0(rowLengths, cursor, width - prompt.length)
+  }
 
+  def findChunk() = {
+
+  }
+  /**
+   * Given a buffer with characters and newlines, calculates how high
+   * the buffer is and where the cursor goes inside of it.
+   */
+  def calculateHeight0(rowLengths: Seq[Int],
+                       cursor: Int,
+                       width: Int): (Int, Int, Int) = {
     val fragHeights =
-      frags
+      rowLengths
         .inits
         .toVector
         .reverse // We want shortest-to-longest, inits gives longest-to-shortest
         .filter(_.nonEmpty) // Without the first empty prefix
         .map{ x =>
           fragHeight(
-            x.last.length + (if (x.map(_.length).sum + x.length - 1 == promptCursor) 1 else 0),
+            x.last + (if (x.sum + x.length - 1 == cursor) 1 else 0),
             width
           )
-
         }
-    println("fragHeights " + fragHeights)
+//    Debug("fragHeights " + fragHeights)
     val totalHeight = fragHeights.sum
 
-    var leftoverCursor = promptCursor
-    println("leftoverCursor " + leftoverCursor)
-    var totalPrefix = 0
+    var leftoverCursor = cursor
+//    Debug("leftoverCursor " + leftoverCursor)
     var totalPreHeight = 0
     var done = false
-    for(i <- 0 until frags.length if !done) {
-      val delta = frags(i).length + (if (i == frags.length - 1) 0 else 1) // length of frag and the '\n' after it
-      println("delta " + delta)
+    // Don't check if the cursor exceeds the last chunk, because
+    // even if it does there's nowhere else for it to go
+    for(i <- 0 until rowLengths.length -1 if !done) {
+      val delta = rowLengths(i) + (if (i == rowLengths.length - 1) 0 else 1) // length of frag and the '\n' after it
+//      Debug("delta " + delta)
       val nextCursor = leftoverCursor - delta
       if (nextCursor >= 0) {
-        println("nextCursor " + nextCursor)
+//        Debug("nextCursor " + nextCursor)
         leftoverCursor = nextCursor
-        totalPrefix += delta
         totalPreHeight += fragHeights(i)
       }else done = true
     }
-    println("totalPreHeight " + totalPreHeight)
-    println("leftoverCursor " + leftoverCursor)
-    println("totalPrefix " + totalPrefix)
-    val cursorY = math.max(0, totalPreHeight - 1) + leftoverCursor / width
+//    Debug("totalPreHeight " + totalPreHeight)
+//    Debug("leftoverCursor " + leftoverCursor)
+//    Debug("width " + width)
+    val cursorY = totalPreHeight + leftoverCursor / width
     val cursorX = leftoverCursor % width
     (totalHeight, cursorY, cursorX)
   }
@@ -107,29 +121,43 @@ object TermCore {
     def redrawLine(buffer: Vector[Char], cursor: Int) = {
       ansi.restore()
       ansi.clearScreen(0)
-      Debug("CURSOR " + cursor)
+//      Debug("CURSOR " + cursor)
       val (transformedBuffer, transformedCursor) = displayTransform(buffer, cursor)
-      Debug("TransCURSOR " + transformedCursor)
+//      Debug("TransCURSOR " + transformedCursor)
       writer.write(prompt)
-      writer.write(transformedBuffer.toArray)
+      var i = 0
+      var currWidth = 0
+      while(i < transformedBuffer.length){
+        if (currWidth >= width - noAnsiPrompt.length){
+          writer.write(" " * noAnsiPrompt.length)
+          currWidth = 0
+        }
+        currWidth += 1
+        writer.write(transformedBuffer(i))
+        if (transformedBuffer(i) == '\n') currWidth += 9999
+        i += 1
+      }
+//      writer.write(transformedBuffer.toArray)
       writer.flush()
       ansi.restore()
       val (nextHeight, cursorY, cursorX) = calculateHeight(buffer, cursor, width, noAnsiPrompt)
-      Debug("DOWN " + cursorY)
-      Debug("RIGHT " + cursorX)
+//      Debug("DOWN " + cursorY)
+//      Debug("RIGHT " + cursorX)
       ansi.down(cursorY)
       ansi.right(cursorX)
+      ansi.right(noAnsiPrompt.length)
       writer.flush()
     }
 
 
     @tailrec def rec(lastState: TermState, areaHeight: Int): Option[String] = {
       redrawLine(lastState.buffer, lastState.cursor)
-      filters(TermInfo(lastState, width)) match {
+      filters(TermInfo(lastState, width - prompt.length)) match {
         case TermState(s, b, c) =>
           val newCursor = math.max(math.min(c, b.length), 0)
 
           val (nextHeight, cursorY, cursorX) = calculateHeight(b, newCursor, width, noAnsiPrompt)
+//          Debug("nextHeight " + nextHeight)
           if (nextHeight > areaHeight) {
             Predef.println()
             ansi.restore()
