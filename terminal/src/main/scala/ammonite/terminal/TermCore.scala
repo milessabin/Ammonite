@@ -14,39 +14,72 @@ import scala.collection.mutable
  * the buffer", and "ansi terminal should reflect most up to date TermState"
  */
 object TermCore {
+  /*
+    width = 2
+    0 -> 1
+    1 -> 1
+    2 -> 1
+    3 -> 2
+    4 -> 2
+    5 -> 3
+     */
+  def fragHeight(length: Int, width: Int) = math.max(1, (length + 1) / width)
+
+  /**
+   * Given a buffer with characters and newlines, calculates how high
+   * the buffer is and where the cursor goes inside of it.
+   */
   def calculateHeight(buffer: Vector[Char],
                       cursor: Int,
                       width: Int,
-                      promptLength: Int): Int = {
+                      prompt: String): (Int, Int, Int) = {
+
     val frags = mutable.Buffer.empty[Vector[Char]]
-    frags.append(Vector.empty)
+    frags.append(prompt.toVector)
     for(c <- buffer){
       if (c == '\n') frags.append(Vector.empty)
       else frags(frags.length - 1) = frags(frags.length - 1) :+ c
     }
-    // -1 because the first frag has no newline before it
-    var cumLength = -1
-    val fragHeights = for(frag <- frags) yield {
-      val fragLength = (
-        // Length of the original text
-        frag.length
+    val promptCursor = cursor + prompt.length
 
-        // Don't forget the prompt! It moves everything to the right
-        + (if (frag == frags.head) promptLength else 0)
-      )
+    val fragHeights =
+      frags
+        .inits
+        .toVector
+        .reverse // We want shortest-to-longest, inits gives longest-to-shortest
+        .filter(_.nonEmpty) // Without the first empty prefix
+        .map{ x =>
+          fragHeight(
+            x.last.length + (if (x.map(_.length).sum + x.length - 1 == promptCursor) 1 else 0),
+            width
+          )
 
-      // +1 to account for the newline between frags
-      cumLength += fragLength + 1
+        }
+    println("fragHeights " + fragHeights)
+    val totalHeight = fragHeights.sum
 
-      // If the cursor is at the end, it needs one more spot
-
-      // We only want to count the last line if there is at
-      // least one character on that line
-
-      val height = (fragLength + (if ((cursor + promptLength) == cumLength) 1 else 0) - 1) / width + 1
-      height
+    var leftoverCursor = promptCursor
+    println("leftoverCursor " + leftoverCursor)
+    var totalPrefix = 0
+    var totalPreHeight = 0
+    var done = false
+    for(i <- 0 until frags.length if !done) {
+      val delta = frags(i).length + (if (i == frags.length - 1) 0 else 1) // length of frag and the '\n' after it
+      println("delta " + delta)
+      val nextCursor = leftoverCursor - delta
+      if (nextCursor >= 0) {
+        println("nextCursor " + nextCursor)
+        leftoverCursor = nextCursor
+        totalPrefix += delta
+        totalPreHeight += fragHeights(i)
+      }else done = true
     }
-    fragHeights.sum
+    println("totalPreHeight " + totalPreHeight)
+    println("leftoverCursor " + leftoverCursor)
+    println("totalPrefix " + totalPrefix)
+    val cursorY = math.max(0, totalPreHeight - 1) + leftoverCursor / width
+    val cursorX = leftoverCursor % width
+    (totalHeight, cursorY, cursorX)
   }
 
   type Filter = PartialFunction[TermInfo, TermAction]
@@ -81,11 +114,11 @@ object TermCore {
       writer.write(transformedBuffer.toArray)
       writer.flush()
       ansi.restore()
-
-      Debug("DOWN " + (transformedCursor + noAnsiPrompt.length) / width)
-      Debug("RIGHT " + (transformedCursor + noAnsiPrompt.length) % width)
-      ansi.down((transformedCursor + noAnsiPrompt.length) / width)
-      ansi.right((transformedCursor + noAnsiPrompt.length) % width)
+      val (nextHeight, cursorY, cursorX) = calculateHeight(buffer, cursor, width, noAnsiPrompt)
+      Debug("DOWN " + cursorY)
+      Debug("RIGHT " + cursorX)
+      ansi.down(cursorY)
+      ansi.right(cursorX)
       writer.flush()
     }
 
@@ -96,7 +129,7 @@ object TermCore {
         case TermState(s, b, c) =>
           val newCursor = math.max(math.min(c, b.length), 0)
 
-          val nextHeight = calculateHeight(b, newCursor, width, noAnsiPrompt.length)
+          val (nextHeight, cursorY, cursorX) = calculateHeight(b, newCursor, width, noAnsiPrompt)
           if (nextHeight > areaHeight) {
             Predef.println()
             ansi.restore()
