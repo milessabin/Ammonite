@@ -117,7 +117,8 @@ object TermCore {
                displayTransform: (Vector[Char], Int) => (Vector[Char], Int) = (x, i) => (x, i))
                : Option[String] = {
 
-    val noAnsiPrompt = prompt.replaceAll("\u001B\\[[;\\d]*m", "")
+    val ansiRegex = "\u001B\\[[;\\d]*m".r
+    val noAnsiPrompt = prompt.replaceAll(ansiRegex.regex, "")
     def redrawLine(buffer: Vector[Char], cursor: Int) = {
       ansi.restore()
       ansi.clearScreen(0)
@@ -132,12 +133,21 @@ object TermCore {
           writer.write(" " * noAnsiPrompt.length)
           currWidth = 0
         }
-        currWidth += 1
-        writer.write(transformedBuffer(i))
-        if (transformedBuffer(i) == '\n') currWidth += 9999
-        i += 1
+
+        ansiRegex.findPrefixMatchOf(transformedBuffer.drop(i)) match{
+          case Some(m) =>
+            Debug("Some(m) " + m.source + " | " + m.source.length)
+            writer.write(transformedBuffer.slice(i, i + m.end).toArray)
+            i += m.end
+          case None =>
+            Debug("None")
+            writer.write(transformedBuffer(i))
+            if (transformedBuffer(i) == '\n') currWidth += 9999
+            currWidth += 1
+            i += 1
+        }
       }
-//      writer.write(transformedBuffer.toArray)
+
       writer.flush()
       ansi.restore()
       val (nextHeight, cursorY, cursorX) = calculateHeight(buffer, cursor, width, noAnsiPrompt)

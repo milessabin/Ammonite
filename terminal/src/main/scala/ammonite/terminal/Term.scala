@@ -1,5 +1,5 @@
 package ammonite.terminal
-import java.io._
+
 
 import scala.annotation.tailrec
 
@@ -11,7 +11,21 @@ object Term{
   def main(args: Array[String]): Unit = {
     rec()
     @tailrec def rec(): Unit = {
-      TermCore.readLine("@ ", System.in, System.out, multilineFilter orElse defaultFilter) match {
+      TermCore.readLine(
+        "@ ",
+        System.in,
+        System.out,
+        // Example multiline support by intercepting Enter key
+        multilineFilter orElse defaultFilter,
+        // Example displayTransform: underline all non-spaces
+        displayTransform = (buffer, cursor) => {
+          val buffer2 = buffer.flatMap{
+            case ' ' => " "
+            case c => Console.UNDERLINED + c + Console.RESET
+          }
+          (buffer2 , cursor)
+        }
+      ) match {
         case None => println("Bye!")
         case Some(s) =>
           println(s)

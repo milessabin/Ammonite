@@ -16,6 +16,7 @@ import jline.console.completer.{CompletionHandler, Completer}
 import org.fusesource.jansi.AnsiOutputStream
 
 import scala.annotation.tailrec
+import scala.collection.mutable
 import scala.tools.nsc.interpreter._
 import collection.JavaConversions._
 
@@ -50,7 +51,35 @@ object FrontEnd{
     }
     def width = 80
     def action(): Res[String] = {
-      TermCore.readLine(shellPrompt, System.in, System.out, multilineFilter orElse Term.defaultFilter)
+      TermCore.readLine(
+        shellPrompt,
+        System.in,
+        System.out,
+        multilineFilter orElse Term.defaultFilter,
+        displayTransform = (buffer, cursor) => {
+          var indices = collection.SortedSet.empty[(Int, String)]
+          ammonite.repl.Splitter.Splitter.parse(buffer.mkString, instrumenter = (name, idx, res) => {
+            def doThing(color: String) = {
+              ammonite.terminal.Debug(name, idx)
+              indices = indices.filter(_._1 < idx) + ((idx, color)) + ((res.index, Console.RESET))
+            }
+            if (name == scalaparse.Scala.Literals.Comment) doThing(Console.BLUE)
+            if (name == scalaparse.Scala.ExprLiteral) doThing(Console.GREEN)
+            if (name == scalaparse.Scala.BindPattern) doThing(Console.CYAN)
+            if (name.toString.head == '`' && name.toString.last == '`') doThing(Console.YELLOW)
+            if (name == scalaparse.Scala.Type) doThing(Console.GREEN)
+          })
+
+          val slices =
+            for(Array(s, e) <- (0 +: indices.map(_._1).toArray :+ 9999).sliding(2))
+            yield buffer.slice(s, e)
+          val buffer2 =
+            slices.zip(indices.iterator.map(_._2) ++ Iterator(Console.RESET))
+                  .flatMap{case (v, s) => v ++ s}
+                  .toVector
+          (buffer2 , cursor)
+        }
+      )
         .map(Res.Success(_))
         .getOrElse(Res.Exit)
     }

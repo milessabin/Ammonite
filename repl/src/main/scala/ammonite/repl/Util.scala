@@ -154,5 +154,5 @@ object BacktickWrap{
 }
 object Splitter{
   val Prelude = P( Annot.rep ~ `implicit`.? ~ `lazy`.? ~ LocalMod.rep )
-  val Splitter = P( Semis.? ~ (scalaparse.Scala.Import | Prelude ~ BlockDef | StatCtx.Expr).!.rep(Semis) ~ Semis.? ~ WL ~ End)
+  val Splitter = P( Semis.? ~ (scalaparse.Scala.Import | Prelude ~ BlockDef | StatCtx.Expr).!.rep(sep=Semis) ~ Semis.? ~ WL ~ End)
 }

@@ -13,7 +13,7 @@ object EulerTests extends TestSuite{
     'p1{
       // Add all the natural numbers below one thousand that are multiples of 3 or 5.*
       check.session("""
-        @ val r = (1 until 1000).view.filter(n => n % 3 == 0 || n % 5 == 0).sum
+        @ val r: Int = (1 until 1000).view.filter(n => n % 3 == 0 || n % 5 == 0).sum
         r: Int = 233168
       """)
     }
