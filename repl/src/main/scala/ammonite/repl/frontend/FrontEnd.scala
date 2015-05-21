@@ -6,7 +6,7 @@ import java.util.Arrays
 
 import ammonite.repl.{Catching, Evaluated, Res}
 import ammonite.terminal.LazyList.~:
-import ammonite.terminal.{TermState, Term, TermCore}
+import ammonite.terminal.{Debug, TermState, Term, TermCore}
 import fastparse._
 import jline.console.completer
 import acyclic.file
@@ -50,35 +50,53 @@ object FrontEnd{
         }
     }
     def width = 80
-    def action(): Res[String] = {
-      TermCore.readLine(
-        shellPrompt,
-        System.in,
-        System.out,
-        multilineFilter orElse Term.defaultFilter,
-        displayTransform = (buffer, cursor) => {
-          var indices = collection.SortedSet.empty[(Int, String)]
-          ammonite.repl.Splitter.Splitter.parse(buffer.mkString, instrumenter = (name, idx, res) => {
-            def doThing(color: String) = {
-              ammonite.terminal.Debug(name, idx)
-              indices = indices.filter(_._1 < idx) + ((idx, color)) + ((res.index, Console.RESET))
+    def highlight(buffer: Vector[Char], cursor: Int) = {
+      val indices = {
+        var indices = collection.SortedSet.empty[(Int, Vector[Char])](Ordering.by(_._1))
+        ammonite.repl.Splitter.Splitter.parse(buffer.mkString, instrumenter = (name, idx, res) => {
+          val resIndex = res() match {
+            case s: Result.Success[_] => s.index
+            case f: Result.Failure if f.index == buffer.length => f.index
+            case _ => -1
+          }
+          if (resIndex != -1) {
+            def doThing(color: String, endColor: String = Console.RESET) = {
+              if (resIndex > idx) {
+                ammonite.terminal.Debug(name, idx)
+                indices = indices.filter(_._1 < resIndex) ++ Seq((idx, color.toVector), (resIndex, endColor.toVector))
+              }
             }
             if (name == scalaparse.Scala.Literals.Comment) doThing(Console.BLUE)
             if (name == scalaparse.Scala.ExprLiteral) doThing(Console.GREEN)
             if (name == scalaparse.Scala.BindPattern) doThing(Console.CYAN)
             if (name.toString.head == '`' && name.toString.last == '`') doThing(Console.YELLOW)
             if (name == scalaparse.Scala.Type) doThing(Console.GREEN)
-          })
+            //            Debug("NAME " + name.toString)
 
-          val slices =
-            for(Array(s, e) <- (0 +: indices.map(_._1).toArray :+ 9999).sliding(2))
-            yield buffer.slice(s, e)
-          val buffer2 =
-            slices.zip(indices.iterator.map(_._2) ++ Iterator(Console.RESET))
-                  .flatMap{case (v, s) => v ++ s}
-                  .toVector
-          (buffer2 , cursor)
-        }
+            if (name.toString == "Interp") doThing(Console.RESET, Console.GREEN)
+          }
+        })
+        indices.toSeq
+      }
+      // Make sure there's an index right at the start and right at the end! This
+      // resets the colors at the snippet's end so they don't bleed into later output
+      val boundedIndices = Seq((0, Console.RESET.toVector)) ++ indices ++ Seq((9999, Console.RESET.toVector))
+
+      val buffer2 =
+        boundedIndices
+          .sliding(2)
+          .flatMap{case Seq((s, c1), (e, c2)) => c1 ++ buffer.slice(s, e) }
+          .toVector
+
+      (buffer2 , cursor)
+    }
+    def action(): Res[String] = {
+      TermCore.readLine(
+        shellPrompt,
+        System.in,
+        System.out,
+        multilineFilter orElse Term.defaultFilter,
+        displayTransform = highlight
       )
         .map(Res.Success(_))
         .getOrElse(Res.Exit)
