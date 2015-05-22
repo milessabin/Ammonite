@@ -21,6 +21,7 @@ object Term{
         displayTransform = (buffer, cursor) => {
           val buffer2 = buffer.flatMap{
             case ' ' => " "
+            case '\n' => "\n"
             case c => Console.UNDERLINED + c + Console.RESET
           }
           (buffer2 , cursor)
@@ -76,9 +77,6 @@ object Term{
     case TS(127 ~: rest, b, c) => // Backspace
       val (first, last) = b.splitAt(c)
       TS(rest, first.dropRight(1) ++ last, c - 1)
-
-
-
 
     case TS(char ~: rest, b, c) =>
       Debug("NORMAL CHAR " + char)

@@ -148,7 +148,6 @@ object TermCore {
         }
       }
 
-      writer.flush()
       ansi.restore()
       val (nextHeight, cursorY, cursorX) = calculateHeight(buffer, cursor, width, noAnsiPrompt)
 //      Debug("DOWN " + cursorY)
@@ -169,14 +168,21 @@ object TermCore {
           val (nextHeight, cursorY, cursorX) = calculateHeight(b, newCursor, width, noAnsiPrompt)
 //          Debug("nextHeight " + nextHeight)
           if (nextHeight > areaHeight) {
-            Predef.println()
+//            Debug(s"New Height $areaHeight -> $nextHeight")
+            // Print enough lines to ensure there's enough space for
+            // everything at the new height. By printing, we get the
+            // correct behavior of scrolling the page up (if at the
+            // bottom of the screen) or moving the cursor down (if not
+            // at the bottom). We then move back to the start of our area
             ansi.restore()
-            ansi.up(1)
+            writer.write("\n" * (nextHeight - 1))
+            writer.flush()
+            ansi.up(nextHeight - 1)
             ansi.save()
           }
           rec(TermState(s, b, newCursor), nextHeight)
         case Result(s) =>
-          redrawLine(lastState.buffer, 9999)
+          redrawLine(lastState.buffer, lastState.buffer.length)
           writer.write(10)
           writer.write(13)
           writer.flush()
@@ -187,7 +193,7 @@ object TermCore {
     }
     lazy val reader = new InputStreamReader(input)
     lazy val writer = new OutputStreamWriter(output)
-    lazy val ansi = new Ansi(output)
+    lazy val ansi = new Ansi(writer)
     lazy val (width, height, initialConfig) = TTY.init()
     try {
       ansi.save()

@@ -1,6 +1,6 @@
 package ammonite.terminal
 
-import java.io.{FileOutputStream, OutputStream}
+import java.io.{Writer, FileOutputStream, OutputStream}
 
 import scala.annotation.tailrec
 import scala.collection.mutable
@@ -9,13 +9,13 @@ import scala.collection.mutable
 object Debug{
   val debugOutput= new FileOutputStream(new java.io.File("log"))
   def apply(s: Any) = {
-    debugOutput.write((System.currentTimeMillis() + "\t\t" + s + "\n").getBytes)
+//    debugOutput.write((System.currentTimeMillis() + "\t\t" + s + "\n").getBytes)
   }
 }
-class Ansi(output: OutputStream){
-  def save() = output.write(s"\033[s".getBytes)
-  def restore() = output.write(s"\033[u".getBytes)
-  def control(n: Int, c: Char) = output.write(s"\033[$n$c".getBytes)
+class Ansi(output: Writer){
+  def save() = output.write(s"\033[s")
+  def restore() = output.write(s"\033[u")
+  def control(n: Int, c: Char) = output.write(s"\033[" + n + c)
 
   /**
    * Moves to the desired row and column, using individual
@@ -63,7 +63,7 @@ class Ansi(output: OutputStream){
    * n=1: clear from cursor to start of screen
    * n=2: clear entire screen
    */
-  def clearScreen(n: Int) = control(n, 'J')
+  def   clearScreen(n: Int) = control(n, 'J')
   /**
    * Clear the current line
    *

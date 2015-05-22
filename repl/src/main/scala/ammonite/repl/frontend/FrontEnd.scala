@@ -31,7 +31,6 @@ trait FrontEnd{
   def action(): Res[String]
   def update(r: Res[Evaluated]): Unit
 }
-
 object FrontEnd{
 
   def special(input: InputStream,
@@ -68,8 +67,16 @@ object FrontEnd{
             }
             if (name == scalaparse.Scala.Literals.Comment) doThing(Console.BLUE)
             if (name == scalaparse.Scala.ExprLiteral) doThing(Console.GREEN)
-            if (name == scalaparse.Scala.BindPattern) doThing(Console.CYAN)
-            if (name.toString.head == '`' && name.toString.last == '`') doThing(Console.YELLOW)
+            if (name == scalaparse.Scala.IdBinding) doThing(Console.CYAN)
+            if (name == scalaparse.Scala.VarId) doThing(Console.CYAN)
+            if (name.toString.head == '`' && name.toString.last == '`') {
+              import scalaparse.syntax.Identifiers._
+              val shortened = name.toString.drop(1).dropRight(1)
+              if (alphaKeywords.contains(shortened) || symbolKeywords.contains(shortened))
+                doThing(Console.YELLOW)
+              else
+                doThing(Console.WHITE)
+            }
             if (name == scalaparse.Scala.Type) doThing(Console.GREEN)
             //            Debug("NAME " + name.toString)
 
