@@ -37,6 +37,13 @@ trait TPrintLowPri{
 
 object TPrintLowPri{
   def typePrintImpl[T: c.WeakTypeTag](c: Context): c.Expr[TPrint[T]] = {
+    implicit val u = c.universe
+    val lifter = new QLifters{
+      val u: c.universe.type = cm.universe
+      val universe = QQ.universeExpr(u)
+    }
+    import lifter._
+    type QTree[T] = ammonite.quasiquote.QTree[c.Tree, T]
     import c.universe._
     // Used to provide "empty string" values in quasiquotes
     val s = ""
@@ -113,7 +120,7 @@ object TPrintLowPri{
         // Make sure the type isn't higher-kinded or some other weird
         // thing, and actually can fit inside the square brackets
         c.typecheck(q"null.asInstanceOf[$tpe]")
-        QQ(ammonite.pprint.TPrint.implicitly[T](AST(evidence)).render(cfgSym()))
+        QQ(ammonite.pprint.TPrint.implicitly(AST(evidence)).render(cfgSym()))
       }catch{case e: TypecheckException =>
         rec0(tpe)
       }

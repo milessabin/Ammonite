@@ -47,6 +47,11 @@ val sharedSettings = Seq(
 )
 
 lazy val quasiquote = project.settings(sharedSettings:_*)
+  .settings(
+    libraryDependencies ++= Seq(
+      "org.scala-lang" % "scala-compiler" % scalaVersion.value % "test"
+    )
+  )
 lazy val pprint = project
   .dependsOn(quasiquote)
   .settings(sharedSettings:_*)
@@ -157,4 +162,4 @@ lazy val readme = ScalatexReadme(
 )
 
 
-lazy val root = project.in(file(".")).aggregate(pprint,  ops, tools, repl)
+lazy val root = project.in(file(".")).aggregate(pprint,  ops, tools, repl, quasiquote)
