@@ -64,10 +64,10 @@ object Internal{
         q"u.LabelDef(${nameLift(name)}, ${params.map(treeLift(_))}, ${treeLift(rhs)})"
       case Import(expr: Tree, selectors: List[ImportSelector]) =>
         q"u.Import(${treeLift(expr)}, ${selectors.map(importSelectorLift(_))})"
-      case tree: Template => ???
-
-      case tree: Block => ???
-
+      case Template(parents: List[Tree], self: ValDef, body: List[Tree]) =>
+        q"u.Template(${parents.map(treeLift(_))}, ${treeLift(self)}, ${body.map(treeLift(_))})"
+      case Block(stats: List[Tree], expr: Tree) =>
+        q"u.Block(${stats.map(treeLift(_))}, ${treeLift(expr)})"
       case tree: CaseDef => ???
 
       case tree: Alternative => ???
