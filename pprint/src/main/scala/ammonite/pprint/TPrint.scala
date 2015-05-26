@@ -4,6 +4,7 @@ package ammonite.pprint
 import language.experimental.macros
 import reflect.macros.blackbox.Context
 import scala.reflect.macros.TypecheckException
+import scala.tools.nsc.Global
 
 /**
  * Summoning an implicit `TPrint[T]` provides a pretty-printed
@@ -33,6 +34,27 @@ object TPrint extends TPrintGen[TPrint, Config] with TPrintLowPri{
 trait TPrintLowPri{
   implicit def default[T]: TPrint[T] = macro TPrintLowPri.typePrintImpl[T]
 }
+case class QTree[T](t: T){
+  def cTree(c: Context): c.Expr[T] = ???
+}
+object QTree{
+  def fromTree[T](t: Context#Tree): QTree[T] = ???
+}
+case class QName[T](s: String){
+  def apply(): T = ???
+}
+object QQ{
+  def apply[T](t: T): QTree[T] = ???
+}
+object AST{
+  def apply[T](t: QTree[T]): T = ???
+}
+object UQ{
+  def apply[T](t: T): T = ???
+}
+case class QType(t: Context#Type){
+  type Splice = Nothing
+}
 object TPrintLowPri{
   def typePrintImpl[T: c.WeakTypeTag](c: Context): c.Expr[TPrint[T]] = {
     import c.universe._
@@ -43,13 +65,13 @@ object TPrintLowPri{
       if (s.name.decodedName.toString.startsWith("_$")) "_"
       else s.name.decodedName.toString.stripSuffix(".type")
 
-    def printSym(s: Symbol): Tree = {
-      q"""$cfgSym.color.literal(${printSymString(s)})"""
+    def printSym(s: Symbol): QTree[String] = {
+      QTree(cfgSym().color.literal(UQ(printSymString(s))))
     }
 
-    def printSymFull(s: Symbol): Tree = {
+    def printSymFull(s: Symbol): QTree[String] = {
       if (lookup(s)) printSym(s)
-      else q"""${printSymFull(s.owner)} + "." + ${printSym(s)}"""
+      else QQ(UQ(printSymFull(s.owner)) + "." + UQ(printSym(s)))
 
     }
     /**
@@ -74,61 +96,63 @@ object TPrintLowPri{
       }
     }
 
-    def prefixFor(pre: Type, sym: Symbol): Tree = {
+    def prefixFor(pre: Type, sym: Symbol): QTree[String] = {
       // Depending on what the prefix is, you may use `#`, `.`
       // or even need to wrap the prefix in parentheses
       val sep = pre match{
-        case x if x.toString.endsWith(".type") => q""" ${rec0(pre)} + "." """
-        case x: TypeRef => q""" $cfgSym.color.literal(${implicitRec(pre)}) + "#" """
-        case x: SingleType => q""" $cfgSym.color.literal(${rec0(pre)}) + "." """
-        case x: ThisType => q""" $cfgSym.color.literal(${rec0(pre)}) + "." """
-        case x => q""" "(" + ${implicitRec(pre)} + ")#" """
+        case x if x.toString.endsWith(".type") => QQ(AST(rec0(pre)) + ".")
+        case x: TypeRef => QQ(cfgSym().color.literal(AST(implicitRec(pre))) + "#")
+        case x: SingleType => QQ(cfgSym().color.literal(AST(rec0(pre))) + "." )
+        case x: ThisType => QQ(cfgSym().color.literal(AST(rec0(pre))) + "." )
+        case x => QQ("(" + AST(implicitRec(pre)) + ")#" )
       }
 
-      val prefix = if (!lookup(sym)) sep else q"$s"
-      q"$prefix + ${printSym(sym)}"
+      val prefix = if (!lookup(sym)) sep else QQ("")
+      QQ(AST(prefix) + AST(printSym(sym)))
     }
 
 
-    def printArgSyms(args: List[Symbol]): Tree = {
+    def printArgSyms(args: List[Symbol]): QTree[String] = {
       def added = args.map{x =>
         val TypeBounds(lo, hi) = x.info
-        q""" ${printSym(x)} +  ${printBounds(lo, hi)}"""
-      }.reduceLeft[Tree]((l, r) => q"""$l + ", " + $r""")
-      if (args == Nil) q"$s" else q""" "[" + $added + "]" """
+        QQ(AST(printSym(x)) +  AST(printBounds(lo, hi)))
+      }.reduceLeft[QTree[String]]((l, r) => QQ(AST(l) + ", " + AST(r)))
+      if (args == Nil) QQ("") else QQ("[" + AST(added) + "]" )
     }
-    def printArgs(args: List[Type]): Tree = {
+    def printArgs(args: List[Type]): QTree[String] = {
       def added = args.map(implicitRec(_))
-        .reduceLeft[Tree]((l, r) => q"""$l + ", " + $r""")
+        .reduceLeft[QTree[String]]((l, r) => QQ(AST(l) + ", " + AST(r)))
 
-      if (args == Nil) q"$s" else q""" "[" + $added + "]" """
+      if (args == Nil) QQ("") else QQ("[" + AST(added) + "]" )
     }
 
 
-    def implicitRec(tpe: Type) = {
+    def implicitRec(tpe: Type): QTree[String] = {
+      val evidence: QTree[TPrint[T]] = QTree.fromTree(c.inferImplicitValue(tpe))
       try {
         // Make sure the type isn't higher-kinded or some other weird
         // thing, and actually can fit inside the square brackets
         c.typecheck(q"null.asInstanceOf[$tpe]")
-        q""" ammonite.pprint.TPrint.implicitly[$tpe].render($cfgSym) """
+        QQ(ammonite.pprint.TPrint.implicitly[T](AST(evidence)).render(cfgSym()))
       }catch{case e: TypecheckException =>
         rec0(tpe)
       }
     }
-    def printBounds(lo: Type, hi: Type) = {
-      val loTree = if (lo =:= typeOf[Nothing]) q"$s" else q""" " >: " + ${implicitRec(lo)} """
-      val hiTree = if (hi =:= typeOf[Any]) q"$s" else q""" " <: " + ${implicitRec(hi)} """
-      q"$loTree + $hiTree"
+
+    def printBounds(lo: Type, hi: Type): QTree[String] = {
+      val loTree = if (lo =:= typeOf[Nothing]) QQ("") else QQ(" >: " + AST(implicitRec(lo)) )
+      val hiTree = if (hi =:= typeOf[Any]) QQ("") else QQ(" <: " + AST(implicitRec(hi)))
+      QQ(AST(loTree) + AST(hiTree))
     }
 
-    def showRefinement(quantified: List[Symbol]) = {
+    def showRefinement(quantified: List[Symbol]): Option[QTree[String]] = {
       def stmts = for{
         t <- quantified
         suffix <- t.info match {
           case PolyType(typeParams, resultType) =>
             val paramTree = printArgSyms(t.asInstanceOf[TypeSymbol].typeParams)
-            val resultBounds = if (resultType =:= typeOf[Any]) q"$s" else q""" " <: " + ${implicitRec(resultType)} """
-            Some(q""" $paramTree + $resultBounds""")
+            val resultBounds = if (resultType =:= typeOf[Any]) QQ("") else QQ( " <: " + AST(implicitRec(resultType)) )
+            Some(QQ(AST(paramTree) + AST(resultBounds)))
           case TypeBounds(lo, hi) if t.toString.contains("$") && lo =:= typeOf[Nothing] && hi =:= typeOf[Any] =>
             None
           case TypeBounds(lo, hi) =>
@@ -139,13 +163,13 @@ object TPrintLowPri{
             val TypeBounds(lo, hi) = t.info
             val RefinedType(parents, defs) = hi
             val filtered = internal.refinedType(parents.filter(x => !(x =:= typeOf[scala.Singleton])), defs)
-            q""" "val " + $cfgSym.color.literal(${t.name.toString.stripSuffix(".type")}) + ": " + ${implicitRec(filtered)}"""
+            QQ("val " + cfgSym().color.literal(UQ(t.name.toString.stripSuffix(".type"))) + ": " + AST(implicitRec(filtered)))
           }else {
-            q""" "type " + ${printSym(t)} + $suffix """
+            QQ("type " + AST(printSym(t)) + AST(suffix) )
           }
         }
       if (stmts.length == 0) None
-      else Some(stmts.reduceLeft((l, r) => q""" $l + "; " + $r """))
+      else Some(stmts.reduceLeft((l, r) => QQ(AST(l) + "; " + AST(r))))
     }
     /**
      * Decide how to pretty-print, based on the type.
@@ -154,45 +178,43 @@ object TPrintLowPri{
      * often, we'll use `implicitRec`, which goes through the normal
      * implicit search channel and can thus
      */
-    def rec0(tpe: Type, end: Boolean = false): Tree = tpe match {
+    def rec0(tpe: Type, end: Boolean = false): QTree[String] = tpe match {
       case TypeBounds(lo, hi) =>
         val res = printBounds(lo, hi)
-        q""" "_" + $res """
+        QQ( "_" + AST(res) )
       case ThisType(sym) =>
-        q"${printSymFull(sym)} + ${if(sym.isPackage || sym.isModuleClass) "" else ".this.type"}"
+        QQ(AST(printSymFull(sym)) + UQ(if(sym.isPackage || sym.isModuleClass) "" else ".this.type"))
 
-      case SingleType(NoPrefix, sym)    => q"${printSym(sym)} + ${if (end) ".type" else ""}"
-      case SingleType(pre, sym)         => q"${prefixFor(pre, sym)} + ${if (end) ".type" else ""}"
+      case SingleType(NoPrefix, sym)    => QQ(AST(printSym(sym)) + UQ(if (end) ".type" else ""))
+      case SingleType(pre, sym)         => QQ(AST(prefixFor(pre, sym)) + UQ(if (end) ".type" else ""))
         // Special-case operator two-parameter types as infix
       case TypeRef(pre, sym, List(left, right))
         if lookup(sym) && sym.name.encodedName.toString != sym.name.decodedName.toString =>
 
-        q"""${implicitRec(left)} + " " + ${printSym(sym)} + " " +${implicitRec(right)}"""
+        QQ(AST(implicitRec(left)) + " " + AST(printSym(sym)) + " " + AST(implicitRec(right)))
 
-      case TypeRef(NoPrefix, sym, args) => q"${printSym(sym)} + ${printArgs(args)}"
-      case TypeRef(pre, sym, args)      => q"${prefixFor(pre, sym)} + ${printArgs(args)}"
+      case TypeRef(NoPrefix, sym, args) => QQ(AST(printSym(sym)) + AST(printArgs(args)))
+      case TypeRef(pre, sym, args)      => QQ(AST(prefixFor(pre, sym)) + AST(printArgs(args)))
       case et @ ExistentialType(quantified, underlying) =>
         showRefinement(quantified) match{
           case None => implicitRec(underlying)
-          case Some(block) => q"""${implicitRec(underlying)} + " forSome { " + $block +  " }" """
+          case Some(block) => QQ(AST(implicitRec(underlying)) + " forSome { " + AST(block) +  " }")
         }
       case AnnotatedType(annots, tp)    =>
-        q"${implicitRec(tp)} + ${annots.map(x => q""" " @" + ${implicitRec(x.tpe)}""").reduceLeft((x, y) => q"$x + $y")}"
+        val annotTrees =
+          annots.map(x => QQ(" @" + AST(implicitRec(x.tpe))))
+                .reduceLeft((x, y) => QQ(AST(x) + AST(y)))
+        QQ(AST(implicitRec(tp)) + AST(annotTrees))
       case RefinedType(parents, defs) =>
         val pre =
-          if (parents.forall(_ =:= typeOf[AnyRef])) q""" "" """
-          else parents.map(implicitRec(_)).reduceLeft[Tree]((l, r) => q"""$l  + " with " + $r""")
-        q"$pre + ${
-          if (defs.isEmpty) "" else "{" + defs.mkString(";") + "}"
-        }"
+          if (parents.forall(_ =:= typeOf[AnyRef])) QQ("")
+          else parents.map(implicitRec(_)).reduceLeft[QTree[String]]((l, r) => QQ(AST(l)  + " with " + AST(r)))
+        QQ(AST(pre) + UQ(if (defs.isEmpty) "" else "{" + defs.mkString(";") + "}"))
     }
-    lazy val cfgSym = c.freshName[TermName]("cfg")
-    val res = c.Expr[TPrint[T]](q"""ammonite.pprint.TPrint.lambda{
-      ($cfgSym: ammonite.pprint.Config) =>
-        ${rec0(tpe, end = true)}
-    }""")
-//    println("RES " + res)
-    res
+    lazy val cfgSym = QName[Config]("cfg")
+    QQ(ammonite.pprint.TPrint.lambda[T]{
+      ($cfgSym: ammonite.pprint.Config) => AST(rec0(tpe, end = true))
+    }).cTree(c)
   }
 
 }
