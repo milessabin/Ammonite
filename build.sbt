@@ -46,7 +46,9 @@ val sharedSettings = Seq(
       </developers>
 )
 
+lazy val quasiquote = project.settings(sharedSettings:_*)
 lazy val pprint = project
+  .dependsOn(quasiquote)
   .settings(sharedSettings:_*)
   .settings(
     name := "ammonite-pprint",

@@ -5,7 +5,7 @@ import language.experimental.macros
 import reflect.macros.blackbox.Context
 import scala.reflect.macros.TypecheckException
 import scala.tools.nsc.Global
-
+import ammonite.quasiquote._
 /**
  * Summoning an implicit `TPrint[T]` provides a pretty-printed
  * string representation of the type `T`, much better than is
@@ -34,27 +34,7 @@ object TPrint extends TPrintGen[TPrint, Config] with TPrintLowPri{
 trait TPrintLowPri{
   implicit def default[T]: TPrint[T] = macro TPrintLowPri.typePrintImpl[T]
 }
-case class QTree[T](t: T){
-  def cTree(c: Context): c.Expr[T] = ???
-}
-object QTree{
-  def fromTree[T](t: Context#Tree): QTree[T] = ???
-}
-case class QName[T](s: String){
-  def apply(): T = ???
-}
-object QQ{
-  def apply[T](t: T): QTree[T] = ???
-}
-object AST{
-  def apply[T](t: QTree[T]): T = ???
-}
-object UQ{
-  def apply[T](t: T): T = ???
-}
-case class QType(t: Context#Type){
-  type Splice = Nothing
-}
+
 object TPrintLowPri{
   def typePrintImpl[T: c.WeakTypeTag](c: Context): c.Expr[TPrint[T]] = {
     import c.universe._
